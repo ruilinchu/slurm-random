@@ -31,7 +31,7 @@ jobid=$1
 uid=$2
 hostname=$3
 isfirst=$4
-lockfile=$(mktemp /dev/shm/rjobstat.XXXXXXXXXX)
+lockfile=$(mktemp /dev/shm/.rjobstat.XXXXXXXXXX)
 
 function bg_collect {
 	out=$($*)
