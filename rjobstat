@@ -1,0 +1,143 @@
+#!/bin/bash
+
+# Copyright (C) 2016 Brigham Young University
+# Author:  Ryan Cox <ryan_cox@byu.edu>
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+#
+# Important note: This script has been cobbled together and not really cleaned up.
+# It works for us on 15.08.x. We noticed conversation about something like this on
+# slurm-dev and decided to release this immediately rather than clean it up first.
+#
+
+jobid=$1
+uid=$2
+hostname=$3
+isfirst=$4
+lockfile=$(mktemp /dev/shm/rjobstat.XXXXXXXXXX)
+
+function bg_collect {
+	out=$($*)
+	lockfile -0 -l 10 "$lockfile" 2>/dev/null
+	echo "$out"
+	rm -f -- "$lockfile" 2>/dev/null
+}
+
+function hit_each_node {
+	local jobid=$1
+	echo -e "Hostname\tAlloc\tMax\tCur\tAlloc\tUsed\tEff% \e[0m"
+	squeue=($(SLURM_TIME_FORMAT=%s squeue -ho "%A %U %N" -j $jobid))
+	jobid=${squeue[0]} #job array support
+	local uid=${squeue[1]}
+	local nodelist=${squeue[2]}
+	
+	local isfirst=1
+	for node in $(scontrol show hostnames $nodelist)
+	do
+		bg_collect ssh -o LogLevel=Quiet $node $0 $jobid $uid $node $isfirst &
+		isfirst=0
+	done
+	wait
+	rm -f -- "$lockfile" 2>/dev/null
+}
+
+function highest_current_value {
+	#local step
+	local stepsum=0
+	#for step in $1/step_*/memory.stat
+	#do
+		#stepsum=$(($(awk '$1 ~ /^(rss|swap)$/ {used+=$2} END {print used;}' "$step")+$stepsum))
+		stepsum=$(($(awk '$1 ~ /^total_(rss|swap)$/ {used+=$2} END {print used;}' "$1/memory.stat")+$stepsum))
+	#done
+	echo $stepsum
+}
+
+function single_node {
+	jobid=$1
+	uid=$2
+	hostname=$3
+	isfirst=$4
+	if [ $isfirst == 1 ]
+	then
+		hostname="*$hostname"
+	fi
+	if [ -d "/cgroup/memory/slurm/uid_$uid/job_$jobid/" ]
+	then
+		elapsed=$(($(date +%s)-$(stat -c %Y /cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)))
+		alloc=$(echo "scale=1; $(cat /cgroup/memory/slurm/uid_$uid/job_$jobid/memory.limit_in_bytes)/1024/1024/1024" | bc)
+		max=$(echo "scale=1; $(cat /cgroup/memory/slurm/uid_$uid/job_$jobid/memory.memsw.max_usage_in_bytes)/1024/1024/1024" | bc)
+		cur=$(echo "scale=1; $(highest_current_value /cgroup/memory/slurm/uid_$uid/job_$jobid)/1024/1024/1024" | bc)
+		cpus=$(count_cpus_in_cpuset $(cat /cgroup/cpuset/slurm/uid_$uid/job_$jobid/cpuset.cpus))
+		cpu_seconds=$(echo "scale=3; $(cat /cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)/1000000000" | bc)
+		cpu_util_total=$(echo "scale=2; $cpu_seconds/$elapsed" | bc | awk '{printf("%0.2f", $1)}')
+		cpu_eff=$(echo "100*$cpu_seconds/($cpus*$elapsed)" | bc)
+		echo -e "$hostname\t$alloc\t$max\t$cur\t$cpus\t$cpu_util_total\t$cpu_eff"
+	else
+		q='?'
+		echo -e "$hostname\t$q\t$q\t$q\t$q\t$q\t$q\t$q"
+	fi
+}
+
+#DEPRECATED: used to use this before cpuacct. This shows more of an instantaneous view than cpuacct so maybe we'll add this back in the future as an extra column?
+function cpu_util {
+	pid=$1
+	read -a stat < /proc/$pid/stat
+	uptime=$(awk '{print $1}' /proc/uptime)
+
+	user_ticks=${stat[13]}
+	kernel_ticks=${stat[14]}
+	#children_user_ticks=${stat[15]}
+	#children_kernel_ticks=${stat[16]}
+	start_time_ticks=${stat[21]}
+	CLK_TCK=$(getconf CLK_TCK)
+
+	total_ticks=$(($user_ticks+$kernel_ticks))
+	#total_ticks=$(($total_ticks+$children_user_ticks+$children_kernel_ticks))
+	elapsed_seconds=$(echo "scale=5; $uptime-($start_time_ticks/$CLK_TCK)" | bc)
+	cpu_usage=$(echo "scale=3; ($total_ticks/$CLK_TCK)/$elapsed_seconds" | bc)
+	#echo "cpu_util: $pid" > /dev/stderr
+	echo "$cpu_usage"
+}
+
+function cpu_util_all {
+	local cgroup="$1"
+	local overall_util=0
+	for pid in $(cat $cgroup/cgroup.procs "$cgroup"/*/cgroup.procs 2>/dev/null)
+	do
+		local util=$(cpu_util $pid)
+		overall_util=$(echo "scale=3; $overall_util+$util" | bc)
+	done
+	printf "%.2f" $overall_util
+}
+
+function count_cpus_in_cpuset {
+	local cpu_list=$1
+	eval $(echo echo $cpu_list | sed -e 's/\([0-9]*\)-\([0-9]*\)/`seq \1 \2`/g' -e 's/,/ /g') | wc -w
+}
+
+if [ "x$hostname" == "x" ]
+then
+	echo -e '\e[1m      Node   |     Memory (GB)     |         CPUs     '
+	hit_each_node $jobid | awk '{printf "%12s %7s %6s %6s %7s %6s %5s %s\n", $1,$2,$3,$4,$5,$6,$7,$8}'
+	echo -e "\n* denotes the node where the batch script executes (node 0)\nCPU usage is cumulative since the start of the job"
+	#Note that CPU usage is over the lifetime of each process in the cpuset cgroup. Some processes may have exited already and will not be counted.  This makes it somewhat more accurate for recent usage but doesn't paint the whole picture over the life of the job
+else
+	single_node $jobid $uid $hostname $isfirst
+fi
