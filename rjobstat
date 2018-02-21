@@ -78,7 +78,7 @@ function single_node {
 	then
 		hostname="*$hostname"
 	fi
-	if [ -d "/cgroup/memory/slurm/uid_$uid/job_$jobid/" ]
+	if [ -d "/sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/" ]
 	then
 		elapsed=$(($(date +%s)-$(stat -c %Y /sys/fs/cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)))
 		alloc=$(echo "scale=1; $(cat /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/memory.limit_in_bytes)/1024/1024/1024" | bc)
