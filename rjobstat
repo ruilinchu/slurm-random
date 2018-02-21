@@ -83,7 +83,7 @@ function single_node {
 		elapsed=$(($(date +%s)-$(stat -c %Y /sys/fs/cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)))
 		alloc=$(echo "scale=1; $(cat /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/memory.limit_in_bytes)/1024/1024/1024" | bc)
 		max=$(echo "scale=1; $(cat /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/memory.memsw.max_usage_in_bytes)/1024/1024/1024" | bc)
-		cur=$(echo "scale=1; $(highest_current_value /cgroup/memory/slurm/uid_$uid/job_$jobid)/1024/1024/1024" | bc)
+		cur=$(echo "scale=1; $(highest_current_value /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid)/1024/1024/1024" | bc)
 		cpus=$(count_cpus_in_cpuset $(cat /sys/fs/cgroup/cpuset/slurm/uid_$uid/job_$jobid/cpuset.cpus))
 		cpu_seconds=$(echo "scale=3; $(cat /sys/fs/cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)/1000000000" | bc)
 		cpu_util_total=$(echo "scale=2; $cpu_seconds/$elapsed" | bc | awk '{printf("%0.2f", $1)}')
