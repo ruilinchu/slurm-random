@@ -95,38 +95,6 @@ function single_node {
 	fi
 }
 
-#DEPRECATED: used to use this before cpuacct. This shows more of an instantaneous view than cpuacct so maybe we'll add this back in the future as an extra column?
-function cpu_util {
-	pid=$1
-	read -a stat < /proc/$pid/stat
-	uptime=$(awk '{print $1}' /proc/uptime)
-
-	user_ticks=${stat[13]}
-	kernel_ticks=${stat[14]}
-	#children_user_ticks=${stat[15]}
-	#children_kernel_ticks=${stat[16]}
-	start_time_ticks=${stat[21]}
-	CLK_TCK=$(getconf CLK_TCK)
-
-	total_ticks=$(($user_ticks+$kernel_ticks))
-	#total_ticks=$(($total_ticks+$children_user_ticks+$children_kernel_ticks))
-	elapsed_seconds=$(echo "scale=5; $uptime-($start_time_ticks/$CLK_TCK)" | bc)
-	cpu_usage=$(echo "scale=3; ($total_ticks/$CLK_TCK)/$elapsed_seconds" | bc)
-	#echo "cpu_util: $pid" > /dev/stderr
-	echo "$cpu_usage"
-}
-
-function cpu_util_all {
-	local cgroup="$1"
-	local overall_util=0
-	for pid in $(cat $cgroup/cgroup.procs "$cgroup"/*/cgroup.procs 2>/dev/null)
-	do
-		local util=$(cpu_util $pid)
-		overall_util=$(echo "scale=3; $overall_util+$util" | bc)
-	done
-	printf "%.2f" $overall_util
-}
-
 function count_cpus_in_cpuset {
 	local cpu_list=$1
 	eval $(echo echo $cpu_list | sed -e 's/\([0-9]*\)-\([0-9]*\)/`seq \1 \2`/g' -e 's/,/ /g') | wc -w
