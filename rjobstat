@@ -80,12 +80,12 @@ function single_node {
 	fi
 	if [ -d "/cgroup/memory/slurm/uid_$uid/job_$jobid/" ]
 	then
-		elapsed=$(($(date +%s)-$(stat -c %Y /cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)))
-		alloc=$(echo "scale=1; $(cat /cgroup/memory/slurm/uid_$uid/job_$jobid/memory.limit_in_bytes)/1024/1024/1024" | bc)
-		max=$(echo "scale=1; $(cat /cgroup/memory/slurm/uid_$uid/job_$jobid/memory.memsw.max_usage_in_bytes)/1024/1024/1024" | bc)
+		elapsed=$(($(date +%s)-$(stat -c %Y /sys/fs/cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)))
+		alloc=$(echo "scale=1; $(cat /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/memory.limit_in_bytes)/1024/1024/1024" | bc)
+		max=$(echo "scale=1; $(cat /sys/fs/cgroup/memory/slurm/uid_$uid/job_$jobid/memory.memsw.max_usage_in_bytes)/1024/1024/1024" | bc)
 		cur=$(echo "scale=1; $(highest_current_value /cgroup/memory/slurm/uid_$uid/job_$jobid)/1024/1024/1024" | bc)
-		cpus=$(count_cpus_in_cpuset $(cat /cgroup/cpuset/slurm/uid_$uid/job_$jobid/cpuset.cpus))
-		cpu_seconds=$(echo "scale=3; $(cat /cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)/1000000000" | bc)
+		cpus=$(count_cpus_in_cpuset $(cat /sys/fs/cgroup/cpuset/slurm/uid_$uid/job_$jobid/cpuset.cpus))
+		cpu_seconds=$(echo "scale=3; $(cat /sys/fs/cgroup/cpuacct/slurm/uid_$uid/job_$jobid/cpuacct.usage)/1000000000" | bc)
 		cpu_util_total=$(echo "scale=2; $cpu_seconds/$elapsed" | bc | awk '{printf("%0.2f", $1)}')
 		cpu_eff=$(echo "100*$cpu_seconds/($cpus*$elapsed)" | bc)
 		echo -e "$hostname\t$alloc\t$max\t$cur\t$cpus\t$cpu_util_total\t$cpu_eff"
